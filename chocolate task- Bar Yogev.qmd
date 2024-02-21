@@ -1,0 +1,145 @@
+---
+title: "Chocolate Task - Bar Yogev"
+format: html
+---
+```{r}
+
+setwd("C:/Users/baryo/Documents")
+
+library(RSQLite)
+library(DBI)
+library(ggplot2)
+library(dplyr)
+library(dbplyr)
+library(odbc)
+```
+
+
+```{r}
+
+con_chocolate <- DBI::dbConnect(drv = RSQLite::SQLite(),
+                                dbname = "C:/Users/baryo/Documents/quarto/chocolate.sqlite")
+
+tables <- DBI::dbListTables(con_chocolate)
+tables
+
+customers <- DBI::dbReadTable(con_chocolate,"customers")
+customers
+
+orders <- DBI::dbReadTable(con_chocolate,"orders")
+orders
+
+products <- DBI::dbReadTable(con_chocolate,"products")
+products
+
+salesreps <- DBI::dbReadTable(con_chocolate,"salesreps")
+salesreps
+```
+
+
+# Question 1- 
+1. According to the query the client wanted the costumer's identification that made the highest total order amount since 1/1/2023.
+
+first, in the query they added a new result named "total_orders" which containes the total sum of orders for each costumer(by multiplying "Price" and "amount") from the table "orders" and the table "product" by using "pid". then it limited it to dates after 1.1.2023 and grouped it by the customer’s identification. after that, they took all columns from the new result they created before ("total_orders") and added it to the table "customers" by the column "cid". then they asked to see the results by "sum_total" in descended order and limited the output to only one result.
+
+2.the costumer that made the highest total order amount since 1/1/2023 is Beieler, Joshua
+who and the amount he spent was 1057.03.
+
+```{sql, connection = con_chocolate, output.var = Q1}
+
+WITH total_orders AS (
+ SELECT cid, SUM(Price * amount) AS sum_total
+ FROM orders
+ LEFT JOIN products USING (pid)
+ WHERE (sale_date > '2023-01-01')
+ GROUP BY cid
+)
+
+SELECT *
+FROM total_orders
+LEFT JOIN customers USING (cid)
+ORDER BY sum_total DESC
+LIMIT 1
+
+
+```
+
+
+
+# Question 2
+
+- the sales rep who made the larger number of sales compared to the average is Pryor, Briana. she made 177 sales.
+
+- Briana's top customer is al-Yousef, Fikri.
+
+- Briana's most sold candy bar is Cookies 'n Cream.
+
+```{sql, connection = con_chocolate, output.var = Q2b}
+
+
+WITH avg_sales AS (
+SELECT srid, COUNT(amount) AS sales_per_rep
+FROM orders 
+GROUP BY srid
+),
+
+avg_per_year AS (
+select year_joined, AVG(sales_per_rep) AS avg
+from avg_sales
+join salesreps USING (srid)
+GROUP BY year_joined, Name
+),
+
+top_s AS (
+SELECT srid, salesreps.Name AS Name_sr, year_joined, sales_per_rep, avg, (sales_per_rep - avg) AS gap
+FROM salesreps
+JOIN avg_sales USING (srid)
+JOIN avg_per_year USING (year_joined)
+ORDER by gap DESC
+LIMIT 1
+),
+
+orders_per_rep AS (
+SELECT  srid, cid, customers.Name AS Name_c, 
+SUM(amount * Price) AS total_payment
+FROM orders 
+JOIN customers USING (cid) 
+JOIN products USING (pid)
+GROUP BY srid, cid, Name_c
+),
+
+top_c AS (
+SELECT cid, Name_c, srid, total_payment
+FROM orders_per_rep
+RIGHT JOIN top_s USING (srid)
+ORDER BY total_payment DESC
+LIMIT 1
+),
+
+most_sold_candy AS (
+SELECT srid, pid, candy_names, SUM(amount) AS total_amount
+FROM orders
+JOIN products USING (pid)
+GROUP BY srid, pid
+),
+
+best_candy AS (
+SELECT candy_names AS Candy, srid, pid, total_amount
+FROM most_sold_candy
+JOIN top_s USING (srid)
+ORDER BY total_amount DESC
+LIMIT 1
+),
+
+conclusion AS (
+SELECT srid, Name_sr, sales_per_rep, Name_c, Candy
+FROM top_s
+JOIN top_c USING (srid)
+JOIN best_candy USING (srid)
+)
+
+SELECT *
+FROM conclusion
+
+```
+
